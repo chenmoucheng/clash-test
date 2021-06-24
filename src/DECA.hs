@@ -1,121 +1,40 @@
-{-# OPTIONS_GHC -Wno-orphans #-}
-module DECA where
+import Prelude
+-- import Test.QuickCheck
 
-import Clash.Prelude
-import Clash.Intel.ClockGen
-import Clash.Annotations.SynthesisAttributes
+xgcd :: Integer -> Integer -> (Integer, Integer, Integer)
+xgcd x y
+  | x < 0 = let (a, b, c) = xgcd (-x) y in (-a, b, c)
+  | y < 0 = let (a, b, c) = xgcd x (-y) in (a, -b, c)
+  | x < y = let (a, b, c) = xgcd y x in (b, a, c)
+  | y == 0 = (1, 0, x)
+  | otherwise = let
+    (q, r) = x `divMod` y
+    (a', b', c') = xgcd y r
+  in (b', a' - q*b', c')
 
-data LedMode
-  = Rotate
-  -- ^ After some period, rotate active led to the left
-  | Complement
-  -- ^ After some period, turn on all disable LEDs, and vice versa
-  deriving (Show, Eq, Enum, Generic, NFDataX)
+propXgcd :: Integer -> Integer -> Bool
+propXgcd x y = a*x + b*y == c where
+  (a, b, c) = xgcd x y
 
--- Define a synthesis domain with a clock with a period of 20000 /ps/.
-createDomain vSystem{vName="Input", vPeriod=20000}
+r = 2^3
+n = 7
+r_inverse = a `mod` n where
+  (a, b, c) = xgcd r n
 
--- Define a synthesis domain with a clock with a period of 50000 /ps/.
-createDomain vSystem{vName="Dom50", vPeriod=50000}
+toMontgomery :: Integer -> Integer
+toMontgomery x = x*r `mod` n
 
-{-# ANN deca
-  (Synthesize
-    { t_name   = "deca"
-    , t_inputs = [ PortName "MAX10_CLK1_50"
-                 , PortName "KEY0"
-                 , PortName "KEY1"
-                 ]
-    , t_output = PortName "LED"
-    }) #-}
-deca
-  :: Clock Input
-      `Annotate` 'StringAttr "chip_pin" "M8"
-      `Annotate` 'StringAttr "altera_attribute" "-name IO_STANDARD \"2.5 V\""
-  -- ^ Incoming clock
-  --
-  -- Annotate with attributes to map the argument to the correct pin, with the
-  -- correct voltage settings, on the DECA development kit.
-  -> Signal Input Bool
-      `Annotate` 'StringAttr "chip_pin" "H21"
-      `Annotate` 'StringAttr "altera_attribute" "-name IO_STANDARD \"1.5 V Schmitt Trigger\""
-  -- ^ Reset signal, straight from KEY0
-  -> Signal Dom50 Bit
-      `Annotate` 'StringAttr "chip_pin" "H22"
-      `Annotate` 'StringAttr "altera_attribute" "-name IO_STANDARD \"1.5 V Schmitt Trigger\""
-  -- ^ Mode choice, straight from KEY1. See 'LedMode'.
-  -> Signal Dom50 (BitVector 8)
-      `Annotate` 'StringAttr "chip_pin" "C5, B4, A5, C4, B7, A6, C8, C7"
-      `Annotate` 'StringAttr "altera_attribute" "-name IO_STANDARD \"1.2 V\""
-  -- ^ Output containing 8 bits, corresponding to 8 LEDs, LEDs are active-low
-  --
-  -- Use comma-seperated list in the "chip_pin" attribute to maps the individual
-  -- bits of the result to the correct pins on the DECA development kit
-deca clk20 rstBtn modeBtn =
-  exposeClockResetEnable
-    (mealy blinkerT initialStateBlinkerT . isRising 1)
-    clk50
-    rstSync
-    en
-    modeBtn
- where
-  -- | Enable line for subcomponents: we'll keep it always running
-  en = enableGen
+fromMontgomery :: Integer -> Integer
+fromMontgomery y = y*r_inverse `mod` n
 
-  -- Start with the first LED turned on, in rotate mode, with the counter on zero
-  initialStateBlinkerT = (1, Rotate, 0)
+propMontgomeryIso1 :: Integer -> Bool
+propMontgomeryIso1 x = fromMontgomery (toMontgomery (x `mod` n)) == x `mod` n
 
-  -- Signal coming from the reset button is low when pressed, and high when
-  -- not pressed. We convert this signal to the polarity of our domain with
-  -- 'unsafeFromLowPolarity'.
-  rst = unsafeFromLowPolarity rstBtn
+propMontgomeryIso2 :: Integer -> Integer -> Bool
+propMontgomeryIso2 x y = (toMontgomery x + toMontgomery y) `mod` n == toMontgomery ((x + y) `mod` n)
 
-  -- Instantiate a PLL: this stabilizes the incoming clock signal and indicates
-  -- when the signal is stable. We're also using it to transform an incoming
-  -- clock signal running at 20 MHz to a clock signal running at 50 MHz.
-  (clk50, pllStable) =
-    altpll
-      @Dom50
-      (SSymbol @"altpll50")
-      clk20
-      rst
+propMontgomeryIso3 :: Integer -> Integer -> Bool
+propMontgomeryIso3 x y = (toMontgomery x * toMontgomery y) `mod` n == toMontgomery ((x*y) `mod` n) -- should fail
 
-  -- Synchronize reset to clock signal coming from PLL. We want the reset to
-  -- remain active while the PLL is NOT stable, hence the conversion with
-  -- 'unsafeFromLowPolarity'
-  rstSync =
-    resetSynchronizer
-      clk50
-      (unsafeFromLowPolarity pllStable)
-      en
-
--- | Changes the LED mode
---
--- >>> flipMode Rotate
--- Complement
--- >>> flipMode Complement
--- Rotate
-flipMode :: LedMode -> LedMode
-flipMode Rotate = Complement
-flipMode Complement = Rotate
-
-blinkerT
-  :: (BitVector 8, LedMode, Index 6660000)
-  -> Bool
-  -> ((BitVector 8, LedMode, Index 6660000), BitVector 8)
-blinkerT (leds, mode, cntr) key1R = ((leds', mode', cntr'), complement leds)
-  where
-    -- clock frequency = 20e6  (20 MHz)
-    -- led update rate = 333e-3 (every 333ms)
-    cnt_max = maxBound :: Index 6660000 -- 20e6 * 333e-3
-
-    cntr' | cntr == cnt_max = 0
-          | otherwise       = cntr + 1
-
-    mode' | key1R     = flipMode mode
-          | otherwise = mode
-
-    leds' | cntr == 0 =
-              case mode of
-                Rotate -> rotateL leds 1
-                Complement -> complement leds
-          | otherwise = leds
+-- montMult :: Integer -> Integer -> Integer
+-- propMontgomeryIso4 x y = (toMontgomery x `multMont` toMontgomery y) `mod` n == toMontgomery ((x*y) `mod` n) -- should work
