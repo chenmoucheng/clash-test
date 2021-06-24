@@ -1,5 +1,5 @@
 import Prelude
--- import Test.QuickCheck
+import Test.QuickCheck
 
 xgcd :: Integer -> Integer -> (Integer, Integer, Integer)
 xgcd x y
@@ -17,7 +17,7 @@ propXgcd x y = a*x + b*y == c where
   (a, b, c) = xgcd x y
 
 r = 2^3
-n = 7
+n = 5
 r_inverse = a `mod` n where
   (a, b, c) = xgcd r n
 
@@ -36,5 +36,8 @@ propMontgomeryIso2 x y = (toMontgomery x + toMontgomery y) `mod` n == toMontgome
 propMontgomeryIso3 :: Integer -> Integer -> Bool
 propMontgomeryIso3 x y = (toMontgomery x * toMontgomery y) `mod` n == toMontgomery ((x*y) `mod` n) -- should fail
 
--- montMult :: Integer -> Integer -> Integer
--- propMontgomeryIso4 x y = (toMontgomery x `multMont` toMontgomery y) `mod` n == toMontgomery ((x*y) `mod` n) -- should work
+montMult :: Integer -> Integer -> Integer
+montMult x y = x*y*r_inverse `mod` n
+
+propMontgomeryIso4 :: Integer -> Integer -> Bool
+propMontgomeryIso4 x y = (toMontgomery x `montMult` toMontgomery y) `mod` n == toMontgomery ((x*y) `mod` n) -- should work
