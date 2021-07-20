@@ -1,5 +1,17 @@
+module DECA
+  ( fromMontgomery
+  , toMontgomery
+  , fromRadix
+  , toRadix
+  , multMontgomery
+  , multMontgomeryRadix
+  ) where
+
+--
+
 import Prelude
-import Test.QuickCheck
+
+--
 
 xgcd :: Integer -> Integer -> (Integer, Integer, Integer)
 xgcd x y
@@ -12,50 +24,49 @@ xgcd x y
     (a', b', c') = xgcd y r
   in (b', a' - q*b', c')
 
-propXgcd :: Integer -> Integer -> Bool
-propXgcd x y = a*x + b*y == c where
-  (a, b, c) = xgcd x y
+inverseMod :: Integer -> Integer -> Integer
+x `inverseMod` n = if a < 0 then a + n else a where
+  (a, _, _) = xgcd x n
 
-inverse :: Integer -> Integer -> Integer
-inverse x y = a `mod` y where
-  (a, b, c) = xgcd x y
+--
 
-propInverse :: Integer -> Integer -> Bool
-propInverse 0 _ = True
-propInverse _ 0 = True
-propInverse 1 _ = True
-propInverse _ 1 = True
-propInverse x y = if y < 0 then True else if gcd x y == 1 then ((inverse x y)*x `mod` y) == 1 else True where
-  gcd x y = c where
-    (a, b, c) = xgcd x y
+toRadix :: Integer -> (Integer, Integer) -> [Word]
+x `toRadix` (m, r)
+  | x < 0 = error "undefined"
+  | r < 2 = error "undefined"
+  | otherwise = case m of
+    1 -> []
+    _ -> fromInteger y : (q `toRadix` (m `div` r, r)) where (q, y) = x `divMod` r
 
-r = 2^3
-n = 5
-r_inverse = inverse r n
-minus_n_inverse = inverse (-n) r
+fromRadix :: [Word] -> Integer -> Integer
+xs `fromRadix` r
+  | r < 2 = error "undefined"
+  | otherwise = case xs of
+    [] -> 0
+    (x:xs') -> toInteger x + (xs' `fromRadix` r) * r
 
-toMontgomery :: Integer -> Integer
-toMontgomery x = x*r `mod` n
+--
 
-fromMontgomery :: Integer -> Integer
-fromMontgomery y = y*r_inverse `mod` n
+toMontgomery :: Integer -> (Integer, Integer) -> Integer
+x `toMontgomery` (m, n) = x * m `mod` n
 
-propMontgomeryIso1 :: Integer -> Bool
-propMontgomeryIso1 x = fromMontgomery (toMontgomery (x `mod` n)) == x `mod` n
+fromMontgomery :: Integer -> (Integer, Integer) -> Integer
+fromMontgomery = reduce
 
-propMontgomeryIso2 :: Integer -> Integer -> Bool
-propMontgomeryIso2 x y = (toMontgomery x + toMontgomery y) `mod` n == toMontgomery ((x + y) `mod` n)
+reduce :: Integer -> (Integer, Integer) -> Integer
+y `reduce` (m, n) = x `normalizeMod` n where
+  minus_n_inverse = (-n) `inverseMod` m
+  q = y `mod` m * minus_n_inverse `mod` m
+  x = (y + q * n) `div` m
 
-propMontgomeryIso3 :: Integer -> Integer -> Bool
-propMontgomeryIso3 x y = (toMontgomery x * toMontgomery y) `mod` n == toMontgomery ((x*y) `mod` n) -- should fail
+normalizeMod :: Integer -> Integer -> Integer
+x `normalizeMod` n = if x < n then x else x - n
 
-montMult :: Integer -> Integer -> Integer
-montMult 0 _ = 0
-montMult _ 0 = 0
-montMult a b = if s < n then s else s - n where
-  t = a*b
-  x = (t `mod` r)*minus_n_inverse `mod` r
-  s = (t + x*n) `div` r
+--
 
-propMontgomeryIso4 :: Integer -> Integer -> Bool
-propMontgomeryIso4 x y = (toMontgomery x `montMult` toMontgomery y) `mod` n == toMontgomery ((x*y) `mod` n) -- should work
+multMontgomery :: (Integer, Integer) -> Integer -> Integer -> Integer
+multMontgomery (m, n) = flip reduce (m, n) `compose2` (*) where compose2 = (.) . (.)
+
+multMontgomeryRadix :: ((Integer, Integer), Integer) -> [Word] -> [Word] -> [Word]
+multMontgomeryRadix ((m, r), n) xs ys = foldl f 0 ys `toRadix` (m, r) where
+  f s y = flip reduce (r, n) $ (xs `fromRadix` r) * (toInteger y) + s
