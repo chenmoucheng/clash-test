@@ -5,11 +5,13 @@ module DECA
   , toRadix
   , multMontgomery
   , multMontgomeryRadix
+  , topEntity
   ) where
 
 --
 
-import Prelude
+import qualified Prelude as P
+import Clash.Prelude
 
 --
 
@@ -68,5 +70,34 @@ multMontgomery :: (Integer, Integer) -> Integer -> Integer -> Integer
 multMontgomery (m, n) = flip reduce (m, n) `compose2` (*) where compose2 = (.) . (.)
 
 multMontgomeryRadix :: ((Integer, Integer), Integer) -> [Word] -> [Word] -> [Word]
-multMontgomeryRadix ((m, r), n) xs ys = foldl f 0 ys `toRadix` (m, r) where
+multMontgomeryRadix ((m, r), n) xs ys = P.foldl f 0 ys `toRadix` (m, r) where
   f s y = flip reduce (r, n) $ (xs `fromRadix` r) * (toInteger y) + s
+
+--
+
+type WordType = Signed 4
+
+toRadix' :: Integer -> Vec 7 WordType
+toRadix' x = unfoldrI f x where
+  f i = (fromInteger r, q)
+    where (q, r) = i `divMod` 2
+
+fromRadix' :: Vec 7 WordType -> Integer
+fromRadix' = foldr f 0 where
+  f x z = toInteger x + z*2
+
+multMontgomeryRadix' :: Integer -> Vec 7 WordType -> Vec 7 WordType -> Vec 7 WordType
+multMontgomeryRadix' n xs ys = toRadix' $ foldl f 0 ys where
+  f s y = flip reduce (2, n) $ (fromRadix' xs) * (toInteger y) + s
+
+--
+
+topEntity
+    :: Clock System
+    -> Reset System
+    -> Enable System
+    -> Signal System (Vec 7 WordType)
+    -> Signal System (Vec 7 WordType)
+    -> Signal System (Vec 7 WordType)
+topEntity = exposeClockResetEnable $ liftA2 (|*|) where
+    (|*|) = multMontgomeryRadix' 107
